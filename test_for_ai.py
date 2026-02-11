@@ -27,8 +27,8 @@ db_config = {
 # 初始化DeepSeek AI大模型客户端
 # 注意：请在生产环境中使用环境变量存储API密钥
 client = OpenAI(
-    api_key="sk-0af76a43d8224550b8aacc3637fd3ab7",  # DeepSeek API密钥
-    base_url="https://api.deepseek.com"              # DeepSeek API服务地址
+    api_key=st.secrets["DEEPSEEK_KEY"],
+    base_url="https://api.deepseek.com"
 )
 
 # ============================================
@@ -46,7 +46,6 @@ if 'ai_data' not in st.session_state:
 # ============================================
 # 3. 数据库操作函数
 # ============================================
-
 def save_to_db(latex, ai_data):
     """
     将识别结果和AI分析数据保存到PostgreSQL数据库
@@ -127,6 +126,7 @@ def clear_history():
         st.error(f"清空失败：{e}")
         return False
 
+
 # ============================================
 # 4. Streamlit页面配置和主界面
 # ============================================
@@ -139,6 +139,7 @@ st.set_page_config(
 
 # 页面主标题
 st.title("题镜 AI —— 智能错题变式系统")
+
 
 # ============================================
 # 5. 侧边栏 - 历史记录看板
@@ -167,6 +168,7 @@ with st.sidebar:
 
 # 页面副标题 - 核心理念说明
 st.caption("核心理念：‘拍一题，练三题，通一类’")
+
 
 # ============================================
 # 6. 核心功能模块
@@ -258,6 +260,7 @@ if st.session_state.ai_data:
     with c3:
         st.info(f"**解题大招**\n\n{data['card']['tip']}")
 
+
     # ============================================
     # 8. 变式分级强化训练
     # ============================================
@@ -288,6 +291,7 @@ if st.session_state.ai_data:
             # 显示AI解析内容
             st.markdown(f"**【题镜 AI 深度解析】**")
             st.success(ex['a'])
+
 
     # ============================================
     # 9. 数据保存功能
