@@ -1,0 +1,10 @@
+{
+    "name": "LBJ",
+    "age": 18,
+    "gender": "男",
+    "hobbies": [
+        "football",
+        "basketball",
+        "swimming"
+    ]
+}

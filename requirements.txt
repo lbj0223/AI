@@ -1,0 +1,5 @@
+streamlit
+pix2tex
+pillow
+openai
+psycopg2-binary
