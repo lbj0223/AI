@@ -1,14 +1,18 @@
 # ============================================
 # 题镜 AI - 智能错题变式系统 (云端正式版)
 # ============================================
-
+# ============================================
+# 1. 强制权限重定向（必须放在最最顶部！）
+# ============================================
 import os
-
-# 【核心修复】必须在导入 LatexOCR 之前设置，将模型下载到可写的 /tmp 目录
+# 告诉所有库：把临时文件、缓存和配置全部丢进 /tmp
+os.environ['HOME'] = '/tmp'
 os.environ['XDG_CONFIG_HOME'] = '/tmp'
+os.environ['XDG_CACHE_HOME'] = '/tmp'
 
 import streamlit as st
 from pix2tex.cli import LatexOCR
+# ... 其余 import 保持不变 ...
 from PIL import Image
 from openai import OpenAI
 import json
