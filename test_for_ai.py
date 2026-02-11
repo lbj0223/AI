@@ -1,18 +1,19 @@
 # ============================================
-# 题镜 AI - 智能错题变式系统 (云端正式版)
+# 题镜 AI - 智能错题变式系统 (云端稳定版)
+# 开发者：LBJ | 核心功能：OCR识别 -> AI分析 -> 云端存储
 # ============================================
-# ============================================
-# 1. 强制权限重定向（必须放在最最顶部！）
-# ============================================
+
+# --- 1. 权限与环境重定向 (必须放在最顶部) ---
 import os
-# 告诉所有库：把临时文件、缓存和配置全部丢进 /tmp
+import argparse
+
+# 强行将所有可能的缓存和配置目录指向可写的 /tmp 文件夹
 os.environ['HOME'] = '/tmp'
 os.environ['XDG_CONFIG_HOME'] = '/tmp'
 os.environ['XDG_CACHE_HOME'] = '/tmp'
 
 import streamlit as st
 from pix2tex.cli import LatexOCR
-# ... 其余 import 保持不变 ...
 from PIL import Image
 from openai import OpenAI
 import json
@@ -20,26 +21,44 @@ import psycopg2
 from psycopg2.extras import Json
 
 # ============================================
-# 1. 核心配置与初始化
+# 2. 核心配置初始化
 # ============================================
 
-# 读取云端 Secrets 配置
+# 从 Streamlit Secrets 读取配置
 db_config = st.secrets["postgres"]
 
-# 初始化 AI 客户端
+# 初始化 DeepSeek 客户端
 client = OpenAI(
     api_key=st.secrets["DEEPSEEK_KEY"],
     base_url="https://api.deepseek.com"
 )
 
 
-# 【优化】使用缓存加载模型，避免重复下载导致的权限或内存问题
 @st.cache_resource
 def load_ocr_model():
-    return LatexOCR()
+    """
+    使用路径注入方案解决 PermissionError
+    """
+    # 构造自定义路径，绕过只读的 site-packages 目录
+    tmp_checkpoint = "/tmp/latest.pth"
+    tmp_config = "/tmp/config.json"
+
+    args = argparse.Namespace(
+        config=tmp_config,
+        checkpoint=tmp_checkpoint,
+        no_cuda=True,
+        no_gui=True
+    )
+
+    try:
+        # 尝试带参数启动，这会强制库在 /tmp 下操作
+        return LatexOCR(args)
+    except Exception:
+        # 备选方案：标准启动（已配合顶部的 os.environ 重定向）
+        return LatexOCR()
 
 
-# 初始化会话状态
+# 初始化 Session 状态
 if 'latex_result' not in st.session_state:
     st.session_state.latex_result = ""
 if 'ai_data' not in st.session_state:
@@ -47,21 +66,19 @@ if 'ai_data' not in st.session_state:
 
 
 # ============================================
-# 2. 数据库操作函数 (对齐 Neon 表结构)
+# 3. 数据库操作 (对齐 Neon error_questions 表)
 # ============================================
 
 def get_db_connection():
-    """建立云端数据库连接"""
-    return psycopg2.connect(**db_config)
+    """建立带 SSL 的云端连接"""
+    return psycopg2.connect(**db_config, sslmode='require')
 
 
 def save_to_db(latex, ai_data):
-    """保存识别结果和AI分析到 error_questions 表"""
+    """保存数据到你在 Neon 创建的 error_questions 表"""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-
-        # 对应你在 Neon SQL Editor 中创建的字段
         query = """
         INSERT INTO error_questions (ocr_latex, analysis, variants)
         VALUES (%s, %s, %s)
@@ -71,33 +88,31 @@ def save_to_db(latex, ai_data):
             Json(ai_data['card']),
             Json(ai_data['exercises'])
         ))
-
         conn.commit()
         cur.close()
         conn.close()
         return True
     except Exception as e:
-        st.error(f"数据保存失败：{e}")
+        st.error(f"云端同步失败：{e}")
         return False
 
 
 def fetch_history():
-    """获取云端历史记录"""
+    """获取最近 5 条云端历史"""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # 统一使用 error_questions 表名
         cur.execute("SELECT id, ocr_latex, created_at FROM error_questions ORDER BY created_at DESC LIMIT 5")
         rows = cur.fetchall()
         cur.close()
         conn.close()
         return rows
-    except Exception as e:
+    except Exception:
         return []
 
 
 def clear_history():
-    """清空所有记录"""
+    """清空云端表数据"""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -112,7 +127,7 @@ def clear_history():
 
 
 # ============================================
-# 3. Streamlit 页面布局
+# 4. Streamlit UI 布局
 # ============================================
 
 st.set_page_config(page_title="题镜 AI", layout="wide")
@@ -122,7 +137,6 @@ st.title("题镜 AI —— 智能错题变式系统")
 with st.sidebar:
     st.header("🕒 云端历史看板")
     history = fetch_history()
-
     if history:
         for row in history:
             with st.expander(f"题目 ID: {row[0]} ({row[2].strftime('%m-%d %H:%M')})"):
@@ -135,7 +149,7 @@ with st.sidebar:
         if clear_history():
             st.rerun()
 
-# --- 主界面 ---
+# --- 主界面：录入与分析 ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -147,8 +161,7 @@ with col1:
         st.image(img, caption="原始题目", use_container_width=True)
 
         if st.button("开始高精度 OCR 识别"):
-            with st.spinner("AI 正在还原题目 DNA..."):
-                # 使用带缓存的模型加载
+            with st.spinner("AI 正在下载模型并还原题目... (首次运行较慢)"):
                 model = load_ocr_model()
                 st.session_state.latex_result = model(img)
                 st.rerun()
@@ -160,8 +173,8 @@ with col2:
         st.latex(st.session_state.latex_result)
 
         if st.button("✨ 第三步：构建变式与知识图谱"):
-            with st.spinner("AI 正在生成分析..."):
-                prompt = f"识别出的题目公式为：{st.session_state.latex_result}。请严格按JSON格式输出card和exercises。"
+            with st.spinner("DeepSeek 正在解析考点..."):
+                prompt = f"识别出的题目公式为：{st.session_state.latex_result}。请严格按 JSON 格式输出 card 和 exercises。"
                 try:
                     response = client.chat.completions.create(
                         model="deepseek-chat",
@@ -170,20 +183,19 @@ with col2:
                     )
                     st.session_state.ai_data = json.loads(response.choices[0].message.content)
                 except Exception as e:
-                    st.error(f"分析失败：{e}")
+                    st.error(f"AI 分析失败：{e}")
 
 # --- 结果展示与保存 ---
 if st.session_state.ai_data:
     st.divider()
     data = st.session_state.ai_data
-
     st.markdown("### 📘 知识复习卡片")
     c1, c2, c3 = st.columns(3)
-    c1.info(f"**考点**\n\n{data['card'].get('point', '待分析')}")
-    c2.info(f"**概念**\n\n{data['card'].get('concept', '待分析')}")
-    c3.info(f"**技巧**\n\n{data['card'].get('tip', '待分析')}")
+    c1.info(f"**核心考点**\n\n{data['card'].get('point', 'N/A')}")
+    c2.info(f"**概念复习**\n\n{data['card'].get('concept', 'N/A')}")
+    c3.info(f"**解题大招**\n\n{data['card'].get('tip', 'N/A')}")
 
-    st.markdown("### ✍️ 变式分级训练")
+    st.markdown("### ✍️ 变式强化训练")
     for ex in data.get('exercises', []):
         with st.status(f"📝 {ex['type']}", expanded=False):
             st.markdown(ex['q'])
@@ -192,5 +204,5 @@ if st.session_state.ai_data:
 
     if st.button("💾 存入云端 AI 错题本"):
         if save_to_db(st.session_state.latex_result, data):
-            st.toast("入库成功！", icon="✅")
+            st.toast("入库成功！已更新云端学情档案", icon="✅")
             st.balloons()
