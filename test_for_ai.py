@@ -12,14 +12,18 @@ from openai import OpenAI                # DeepSeek AI大模型API
 import json                              # JSON数据处理
 import psycopg2                          # PostgreSQL数据库连接
 from psycopg2.extras import Json         # PostgreSQL JSON字段支持
-# 1. 数据库统一配置（请确保信息与你 pgAdmin 中的一致）
-db_config = {
-    "dbname": "AI",     # 你的数据库名
-    "user": "postgres",       # 你的用户名
-    "password": "123456",    # 你之前测试成功的那个密码
-    "host": "localhost",
-    "port": "5432"
-}
+# 数据库统一配置（请确保信息与你 pgAdmin 中的一致）
+# 1. 放在文件顶部的全局配置
+db_config = st.secrets["postgres"]
+
+# 2. 在具体函数里使用（例如你之前的 fetch_history）
+def fetch_history():
+    try:
+        # 每次调用时才建立连接，用完就关，这样最稳定
+        conn = psycopg2.connect(**db_config)
+        # ... 你的代码逻辑 ...
+    except Exception as e:
+        st.error(f"连接失败: {e}")
 # ============================================
 # 1. 核心配置初始化
 # ============================================
