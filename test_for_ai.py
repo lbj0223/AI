@@ -101,7 +101,7 @@ def fetch_history():
             dbname="AI",
             user="postgres",
             password="123456",
-            host="localhost",
+            host="198.181.34.168",
             port="5432"
         )
         cur = conn.cursor()
