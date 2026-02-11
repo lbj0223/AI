@@ -67,7 +67,7 @@ def save_to_db(latex, ai_data):
             dbname="AI",          # 数据库名称
             user="postgres",      # 用户名
             password="123456",    # 密码
-            host="localhost",     # 主机地址
+            host="198.181.34.168",     # 主机地址
             port="5432"           # 端口号
         )
         cur = conn.cursor()
