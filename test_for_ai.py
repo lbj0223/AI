@@ -62,13 +62,11 @@ def save_to_db(latex, ai_data):
         bool: 保存成功返回True，失败返回False
     """
     try:
-        # 建立数据库连接
+        # 建立数据库连接（不再手动填地址，而是从 Streamlit 的“保险箱”自动读取）
+        # sslmode='require' 是连接 Neon 云数据库必须加的参数
         conn = psycopg2.connect(
-            dbname="AI",          # 数据库名称
-            user="postgres",      # 用户名
-            password="123456",    # 密码
-            host="198.181.34.168",     # 主机地址
-            port="5432"           # 端口号
+            **st.secrets["postgres"],
+            sslmode='require'
         )
         cur = conn.cursor()
 
