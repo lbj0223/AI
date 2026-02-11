@@ -1,11 +1,10 @@
 # ============================================
 # 题镜 AI - 智能错题变式系统 (云端正式版)
-# 核心功能：OCR识别 -> AI分析 -> 变式生成 -> 云端存储
 # ============================================
 
 import os
 
-# 【关键修复】必须在导入 LatexOCR 之前设置环境，解决 PermissionError
+# 【核心修复】必须在导入 LatexOCR 之前设置，将模型下载到可写的 /tmp 目录
 os.environ['XDG_CONFIG_HOME'] = '/tmp'
 
 import streamlit as st
@@ -20,17 +19,17 @@ from psycopg2.extras import Json
 # 1. 核心配置与初始化
 # ============================================
 
-# 从 Secrets 读取 Neon 云数据库配置
+# 读取云端 Secrets 配置
 db_config = st.secrets["postgres"]
 
-# 初始化 DeepSeek 客户端
+# 初始化 AI 客户端
 client = OpenAI(
     api_key=st.secrets["DEEPSEEK_KEY"],
     base_url="https://api.deepseek.com"
 )
 
 
-# 使用缓存加载 OCR 模型，防止重复下载和内存溢出
+# 【优化】使用缓存加载模型，避免重复下载导致的权限或内存问题
 @st.cache_resource
 def load_ocr_model():
     return LatexOCR()
@@ -44,7 +43,7 @@ if 'ai_data' not in st.session_state:
 
 
 # ============================================
-# 2. 数据库操作函数 (统一使用 Neon 表结构)
+# 2. 数据库操作函数 (对齐 Neon 表结构)
 # ============================================
 
 def get_db_connection():
@@ -74,7 +73,7 @@ def save_to_db(latex, ai_data):
         conn.close()
         return True
     except Exception as e:
-        st.error(f"云端保存失败：{e}")
+        st.error(f"数据保存失败：{e}")
         return False
 
 
@@ -83,19 +82,18 @@ def fetch_history():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # 按时间倒序查出最近的 5 条
+        # 统一使用 error_questions 表名
         cur.execute("SELECT id, ocr_latex, created_at FROM error_questions ORDER BY created_at DESC LIMIT 5")
         rows = cur.fetchall()
         cur.close()
         conn.close()
         return rows
     except Exception as e:
-        # 如果表还未创建或连接失败，返回空列表
         return []
 
 
 def clear_history():
-    """清空云端所有历史记录"""
+    """清空所有记录"""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -116,7 +114,7 @@ def clear_history():
 st.set_page_config(page_title="题镜 AI", layout="wide")
 st.title("题镜 AI —— 智能错题变式系统")
 
-# --- 侧边栏：云端历史看板 ---
+# --- 侧边栏：历史记录 ---
 with st.sidebar:
     st.header("🕒 云端历史看板")
     history = fetch_history()
@@ -125,19 +123,15 @@ with st.sidebar:
         for row in history:
             with st.expander(f"题目 ID: {row[0]} ({row[2].strftime('%m-%d %H:%M')})"):
                 st.latex(row[1])
-                st.info("已同步至云端错题本")
     else:
         st.write("暂无历史记录，快去上传第一道题吧！")
 
     st.divider()
     if st.button("🗑️ 清空所有记录"):
         if clear_history():
-            st.toast("云端记录已扫除", icon="🧹")
             st.rerun()
 
-st.caption("核心理念：‘拍一题，练三题，通一类’")
-
-# --- 主界面：错题录入 ---
+# --- 主界面 ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -150,7 +144,7 @@ with col1:
 
         if st.button("开始高精度 OCR 识别"):
             with st.spinner("AI 正在还原题目 DNA..."):
-                # 调用缓存的加载函数
+                # 使用带缓存的模型加载
                 model = load_ocr_model()
                 st.session_state.latex_result = model(img)
                 st.rerun()
@@ -162,19 +156,8 @@ with col2:
         st.latex(st.session_state.latex_result)
 
         if st.button("✨ 第三步：构建变式与知识图谱"):
-            with st.spinner("DeepSeek 正在解析考点..."):
-                prompt = f"""
-                你现在是"题镜 AI"专家。识别出的题目公式为：{st.session_state.latex_result}
-                请严格按 JSON 格式输出：
-                {{
-                  "card": {{ "point": "考点名称", "concept": "概念复习", "tip": "解题技巧" }},
-                  "exercises": [
-                    {{ "type": "平行变式", "q": "题目内容", "a": "解析内容" }},
-                    {{ "type": "进阶变式", "q": "题目内容", "a": "解析内容" }},
-                    {{ "type": "应用变式", "q": "题目内容", "a": "解析内容" }}
-                  ]
-                }}
-                """
+            with st.spinner("AI 正在生成分析..."):
+                prompt = f"识别出的题目公式为：{st.session_state.latex_result}。请严格按JSON格式输出card和exercises。"
                 try:
                     response = client.chat.completions.create(
                         model="deepseek-chat",
@@ -183,7 +166,7 @@ with col2:
                     )
                     st.session_state.ai_data = json.loads(response.choices[0].message.content)
                 except Exception as e:
-                    st.error(f"AI 分析失败：{e}")
+                    st.error(f"分析失败：{e}")
 
 # --- 结果展示与保存 ---
 if st.session_state.ai_data:
@@ -192,20 +175,18 @@ if st.session_state.ai_data:
 
     st.markdown("### 📘 知识复习卡片")
     c1, c2, c3 = st.columns(3)
-    c1.info(f"**核心考点**\n\n{data['card']['point']}")
-    c2.info(f"**核心概念**\n\n{data['card']['concept']}")
-    c3.info(f"**解题大招**\n\n{data['card']['tip']}")
+    c1.info(f"**考点**\n\n{data['card'].get('point', '待分析')}")
+    c2.info(f"**概念**\n\n{data['card'].get('concept', '待分析')}")
+    c3.info(f"**技巧**\n\n{data['card'].get('tip', '待分析')}")
 
-    st.markdown("### ✍️ 变式分级强化训练")
-    for ex in data['exercises']:
+    st.markdown("### ✍️ 变式分级训练")
+    for ex in data.get('exercises', []):
         with st.status(f"📝 {ex['type']}", expanded=False):
-            st.markdown(f"**【题目内容】**\n{ex['q']}")
+            st.markdown(ex['q'])
             st.divider()
-            st.success(f"**【题镜 AI 深度解析】**\n{ex['a']}")
+            st.success(ex['a'])
 
-    st.write("---")
     if st.button("💾 存入云端 AI 错题本"):
-        with st.spinner("正在同步至 Neon 云端 PostgreSQL..."):
-            if save_to_db(st.session_state.latex_result, data):
-                st.toast("入库成功！已更新云端学情档案", icon="✅")
-                st.balloons()
+        if save_to_db(st.session_state.latex_result, data):
+            st.toast("入库成功！", icon="✅")
+            st.balloons()
